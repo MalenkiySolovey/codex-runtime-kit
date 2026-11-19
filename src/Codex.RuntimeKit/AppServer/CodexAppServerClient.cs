@@ -464,7 +464,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             if (Volatile.Read(ref _stopping) == 0)
             {
                 var processId = TryGetProcessId(process);
-                FailAllPending(new CodexAppServerProcessExitedException(processId, TryGetExitCode(process)));
+                FailAllPending(new CodexAppServerProcessExitedException(processId, TryGetExitCodeAfterExit(process)));
             }
         }
     }
@@ -552,9 +552,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     private void OnProcessExited(Process process, int processId)
     {
         UnregisterOwnedProcess(processId);
-        try { process.WaitForExit(); }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException) { }
-        int? exitCode = TryGetExitCode(process);
+        int? exitCode = TryGetExitCodeAfterExit(process);
         if (Volatile.Read(ref _stopping) == 0)
         {
             FailAllPending(new CodexAppServerProcessExitedException(processId, exitCode));
@@ -636,6 +634,24 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     {
         try { return process.ExitCode; }
         catch (InvalidOperationException) { return null; }
+    }
+
+    private static int? TryGetExitCodeAfterExit(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                return null;
+            }
+
+            process.WaitForExit();
+            return process.ExitCode;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException)
+        {
+            return null;
+        }
     }
 
     private static void TryKillOwnedProcess(Process process)
