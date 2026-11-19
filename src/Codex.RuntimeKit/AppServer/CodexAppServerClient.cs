@@ -552,6 +552,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     private void OnProcessExited(Process process, int processId)
     {
         UnregisterOwnedProcess(processId);
+        try { process.WaitForExit(); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException) { }
         int? exitCode = TryGetExitCode(process);
         if (Volatile.Read(ref _stopping) == 0)
         {
