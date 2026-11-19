@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>Codex.RuntimeKit</PackageId>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>MalenkiySolovey</Authors>
+    <Description>Independent Codex runtime discovery, capability probing, and app-server stdio transport.</Description>
+    <PackageProjectUrl>https://github.com/MalenkiySolovey/codex-runtime-kit</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MalenkiySolovey/codex-runtime-kit</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>codex;runtime;app-server;stdio</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

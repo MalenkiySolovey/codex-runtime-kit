@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/Codex.RuntimeKit/Codex.RuntimeKit.csproj" />
+  <Project Path="tests/Codex.RuntimeKit.Tests/Codex.RuntimeKit.Tests.csproj" />
+  <Project Path="tests/Codex.RuntimeKit.TestServer/Codex.RuntimeKit.TestServer.csproj" />
+</Solution>
