@@ -464,7 +464,15 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             if (Volatile.Read(ref _stopping) == 0)
             {
                 var processId = TryGetProcessId(process);
-                FailAllPending(new CodexAppServerProcessExitedException(processId, TryGetExitCodeAfterExit(process)));
+                if (await WaitForProcessExitAsync(process, _options.ForcedShutdownTimeout).ConfigureAwait(false))
+                {
+                    FailAllPending(new CodexAppServerProcessExitedException(processId, TryGetExitCode(process)));
+                }
+                else
+                {
+                    FailAllPending(new CodexAppServerProtocolException("Codex app-server stdout closed while its child process was still running."));
+                    TryKillOwnedProcess(process);
+                }
             }
         }
     }
@@ -651,6 +659,23 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException)
         {
             return null;
+        }
+    }
+
+    private static async Task<bool> WaitForProcessExitAsync(Process process, TimeSpan timeout)
+    {
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(timeout).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException)
+        {
+            return HasExited(process);
         }
     }
 
