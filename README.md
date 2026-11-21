@@ -1,13 +1,74 @@
 # Codex Runtime Kit
 
-`Codex.RuntimeKit` is a small .NET library for discovering local Codex CLI executables, probing runtime capabilities, and connecting to the Codex app-server over stdio.
+`Codex.RuntimeKit` is a small .NET library for discovering local Codex CLI executables, probing runtime capabilities, connecting to the Codex app-server over stdio, and managing a verified Codex Desktop renderer extension session.
 
 - Target framework: `net10.0`
 - Package ID: `Codex.RuntimeKit`
-- Initial package version: `0.1.0-preview.1`
+- Package version: `0.1.0-preview.2`
 - Dependencies: none in the library package
 
-The library owns runtime discovery and the app-server transport. The host keeps account selection, credential storage, routing policy, application settings, UI, and application process registries.
+The library owns runtime discovery, the app-server transport, and Desktop app control. The host keeps account selection, credential storage, routing policy, application settings, UI, and application process registries.
+
+## Codex Desktop discovery and compatibility
+
+`CodexDesktopDiscovery` scans only explicitly configured MSIX package identities. It verifies the package name, publisher, application ID, manifest version, and that the executable resolves inside the package root. The default identity matches the official `OpenAI.Codex` MSIX package family. Discovery returns a short diagnostic code instead of exposing local paths in errors.
+
+```csharp
+using Codex.RuntimeKit.Desktop.Compatibility;
+using Codex.RuntimeKit.Desktop.Discovery;
+
+var discovered = new CodexDesktopDiscovery().Discover();
+if (!discovered.IsAvailable)
+{
+    throw new InvalidOperationException(discovered.DiagnosticCode);
+}
+
+var compatibility = new CodexDesktopCompatibilityMatrix(verifiedBuildRules);
+var support = compatibility.Evaluate(discovered.Installation!.Version);
+```
+
+Compatibility rules are explicit version ranges with a renderer-contract identifier. An unlisted build is `Unverified`; a rule with an unverified renderer contract is `Unsupported`. Nearby versions do not inherit support.
+
+## Managed lifecycle and CDP
+
+`CodexDesktopManagedLauncher` requires explicit consent, revalidates the MSIX identity, and refuses to start when it cannot determine whether an official app process already exists. By default it also refuses when one is running. A separate isolated instance is possible only when the caller explicitly sets `AllowConcurrentIsolatedInstance`; the existing instance is never redirected, closed, or reconfigured. Each managed launch uses a new per-run renderer profile and a distinct per-run `CODEX_HOME`, loopback-only CDP, and an ephemeral port. Set `ManagedProfileRoot` when the profile must live on a chosen volume; both data paths are placed beneath that root. It strips inherited `OPENAI_API_KEY` and `CODEX_API_KEY` variables. The returned session can request a graceful window close; RuntimeKit never force-terminates a process.
+
+On Windows, discovery first reads the current user's MSIX package registration, then validates the package manifest identity, publisher, version, and executable path. It falls back to package-directory scanning when no current-user registration is available. If the MSIX entrypoint is a short-lived launcher, managed startup identifies the actual process from the loopback DevTools listener in that run's unique profile and verifies that process's executable image before returning a session.
+
+`CodexDesktopDebugEndpoint.TryReadManagedProfile` accepts the browser endpoint only when the supplied profile matches the managed session and the loopback listener PID and executable match that session. `CodexDesktopDebugTransport` bounds target-list size and only attaches to a unique `app://-/index.html` page. Before exposing the session, it checks independent app-scheme, main-content, composer, and visible Codex-mode signals. Auxiliary pages and ambiguous targets are rejected.
+
+```csharp
+using Codex.RuntimeKit.Desktop.DebugTransport;
+
+var ownerResolver = new WindowsCodexDesktopListenerOwnerResolver();
+if (!CodexDesktopDebugEndpoint.TryReadManagedProfile(
+        managedSession.ProfileDirectory,
+        managedSession,
+        ownerResolver,
+        out var endpoint,
+        out var diagnostic))
+{
+    throw new InvalidOperationException(diagnostic);
+}
+
+var transport = new CodexDesktopDebugTransport();
+var targets = await transport.GetTargetsAsync(endpoint!);
+var attached = await transport.AttachToMainRendererAsync(endpoint!, targets);
+if (attached.Session is null)
+{
+    throw new InvalidOperationException(attached.DiagnosticCode);
+}
+```
+
+The attached session intentionally has no public raw `Runtime.evaluate` or generic CDP command method.
+
+## Bundled renderer extensions
+
+`CodexDesktopExtensionHost` accepts only a caller-bundled package whose identifier and SHA-256 are present in the host's compiled allowlist. Scripts have a 64 KiB size cap, a tested desktop-version range, and must return a cleanup function. The host registers a removable new-document script, injects idempotently into the verified main renderer, and removes the old script on update or disable. The bootstrap rechecks the main app URL, content signals, and Codex mode before running after navigation. There is no provider-catalog script execution, remote source loading, marketplace, or file-path based loader.
+
+The extension source still owns its specific UI anchor and must remove every root, event handler, and observer in its cleanup function. It should use a bounded observer, semantic anchors, text-only value updates, and fail closed when an anchor is missing or ambiguous. RuntimeKit does not choose an anchor or own provider/account data.
+
+The currently installed Desktop build was observed as MSIX `26.1117.3838.0`. RuntimeKit does not mark that build as compatible by default: a product integration must verify its status-slot anchor and visible cleanup/reload behavior before adding an explicit rule. Plugin-extension surfaces do not provide a documented bottom status pill.
 
 ## Runtime discovery
 
