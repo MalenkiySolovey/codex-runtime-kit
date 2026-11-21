@@ -320,7 +320,11 @@ public sealed class CodexDesktopDiscovery
             return false;
         }
 
-        var executablePath = Path.GetFullPath(Path.Combine(fullRoot, executableRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var executablePath = Path.GetFullPath(Path.Combine(
+            fullRoot,
+            executableRelativePath
+                .Replace('/', Path.DirectorySeparatorChar)
+                .Replace('\\', Path.DirectorySeparatorChar)));
         var rootPrefix = fullRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!executablePath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !File.Exists(executablePath))
         {
