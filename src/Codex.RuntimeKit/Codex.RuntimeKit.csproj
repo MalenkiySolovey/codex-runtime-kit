@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>Codex.RuntimeKit</PackageId>
-    <Version>0.1.0-preview.3</Version>
+    <Version>0.1.0-preview.4</Version>
     <Authors>MalenkiySolovey</Authors>
     <Description>Codex CLI runtime discovery, app-server transport, and verified Desktop renderer extension primitives.</Description>
     <PackageProjectUrl>https://github.com/MalenkiySolovey/codex-runtime-kit</PackageProjectUrl>

@@ -127,6 +127,31 @@ public sealed class CodexDesktopLifecycleTests
     }
 
     [Fact]
+    public void ParentLifetime_ReplacesOnlyTheOwnedSupervisorOnTheVerifiedBuild()
+    {
+        var installation = new CodexDesktopInstallation(
+            "OpenAI.Codex", "OpenAI.Codex_2p2nqsd0c76g0", "synthetic", "synthetic",
+            "ChatGPT.exe", new Version(26, 1117, 4957, 0));
+        var start = new ProcessStartInfo { FileName = installation.ExecutablePath };
+        start.Environment["CODEX_ELECTRON_DEV_PARENT_PID"] = "1";
+        start.Environment["CODEX_ELECTRON_DEV_WEBVIEW_PID"] = "2";
+
+        var configured = CodexDesktopParentLifetime.ConfigureLaunch(start, installation, 1234);
+
+        Assert.Equal(OperatingSystem.IsWindows(), configured);
+        Assert.False(start.Environment.ContainsKey("CODEX_ELECTRON_DEV_WEBVIEW_PID"));
+        Assert.Equal(configured, start.Environment.TryGetValue("CODEX_ELECTRON_DEV_PARENT_PID", out var parentId));
+        if (configured)
+        {
+            Assert.Equal("1234", parentId);
+        }
+
+        var unverifiedBuild = installation with { Version = new Version(26, 1117, 4958, 0) };
+        Assert.False(CodexDesktopParentLifetime.ConfigureLaunch(start, unverifiedBuild, 1234));
+        Assert.False(start.Environment.ContainsKey("CODEX_ELECTRON_DEV_PARENT_PID"));
+    }
+
+    [Fact]
     public void ManagedLaunch_ResolvesTheActualRendererProcessFromItsUniqueProfileListener()
     {
         using var temp = new TemporaryDirectory();

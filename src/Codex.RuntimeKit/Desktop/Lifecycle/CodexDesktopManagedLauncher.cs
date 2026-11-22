@@ -145,6 +145,7 @@ public sealed class CodexDesktopManagedLauncher
             startInfo.Environment["CODEX_HOME"] = codexHome;
             startInfo.Environment.Remove("OPENAI_API_KEY");
             startInfo.Environment.Remove("CODEX_API_KEY");
+            CodexDesktopParentLifetime.ConfigureLaunch(startInfo, request.Installation);
 
             var process = _processStarter.Start(startInfo);
             if (process is null || process.HasExited)
