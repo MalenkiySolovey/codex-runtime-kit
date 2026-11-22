@@ -20,7 +20,11 @@ public sealed record CodexDesktopExtensionPackage(
     Version MinimumDesktopVersion,
     Version MaximumDesktopVersion,
     string Sha256,
-    string JavaScript);
+    string JavaScript)
+{
+    /// <summary>Set to false when the host must confirm live state again after a document reload.</summary>
+    public bool RestorePayloadOnReload { get; init; } = true;
+}
 
 public enum CodexDesktopExtensionResultState
 {
@@ -100,7 +104,7 @@ public sealed class CodexDesktopExtensionHost
             var applied = await channel.EvaluateExtensionAsync(installExpression, cancellationToken).ConfigureAwait(false);
             if (!applied)
             {
-                await channel.RemoveDocumentScriptAsync(documentScriptId, cancellationToken).ConfigureAwait(false);
+                await RollBackInstallAsync(package.Id, channel, documentScriptId).ConfigureAwait(false);
                 return new(CodexDesktopExtensionResultState.Failed, "desktop.extension.renderer-install-failed");
             }
 
@@ -112,7 +116,7 @@ public sealed class CodexDesktopExtensionHost
                     await TryRemoveExtensionAsync(previous.Channel, package.Id).ConfigureAwait(false);
                 }
 
-                await TryRemoveDocumentScriptsAsync(previous.Channel, previous.DocumentScriptIds).ConfigureAwait(false);
+                await RemoveRegisteredScriptsAsync(previous, previous.DocumentScriptIds.ToArray(), CancellationToken.None).ConfigureAwait(false);
             }
 
             _installed[package.Id] = new InstalledScript(package, [documentScriptId], channel);
@@ -125,7 +129,7 @@ public sealed class CodexDesktopExtensionHost
         {
             if (!string.IsNullOrWhiteSpace(documentScriptId))
             {
-                await TryRemoveDocumentScriptsAsync(channel, [documentScriptId]).ConfigureAwait(false);
+                await RollBackInstallAsync(package.Id, channel, documentScriptId).ConfigureAwait(false);
             }
 
             throw;
@@ -134,7 +138,7 @@ public sealed class CodexDesktopExtensionHost
         {
             if (!string.IsNullOrWhiteSpace(documentScriptId))
             {
-                await TryRemoveDocumentScriptsAsync(channel, [documentScriptId]).ConfigureAwait(false);
+                await RollBackInstallAsync(package.Id, channel, documentScriptId).ConfigureAwait(false);
             }
 
             return new(CodexDesktopExtensionResultState.Failed, "desktop.extension.operation-failed");
@@ -166,17 +170,25 @@ public sealed class CodexDesktopExtensionHost
             return new(CodexDesktopExtensionResultState.Rejected, "desktop.extension.renderer-unverified");
         }
 
-        var removed = await channel.EvaluateExtensionAsync(CreateRemoveExpression(extensionId), cancellationToken).ConfigureAwait(false);
-        var hadRegisteredScript = false;
-        if (_installed.Remove(extensionId, out var installed))
+        var hasRegistration = _installed.TryGetValue(extensionId, out var installed);
+        if (installed is not null)
         {
-            hadRegisteredScript = await TryRemoveDocumentScriptsAsync(
-                installed.Channel,
-                installed.DocumentScriptIds,
-                cancellationToken).ConfigureAwait(false);
+            if (!ReferenceEquals(installed.Channel, channel))
+            {
+                return new(CodexDesktopExtensionResultState.Rejected, "desktop.extension.channel-mismatch");
+            }
+
+            await RemoveRegisteredScriptsAsync(installed, installed.DocumentScriptIds.ToArray(), cancellationToken).ConfigureAwait(false);
+            if (installed.DocumentScriptIds.Count == 0) _installed.Remove(extensionId);
         }
 
-        return removed || hadRegisteredScript
+        var removed = await channel.EvaluateExtensionAsync(CreateRemoveExpression(extensionId), cancellationToken).ConfigureAwait(false);
+        if (installed?.DocumentScriptIds.Count > 0)
+        {
+            return new(CodexDesktopExtensionResultState.Failed, "desktop.extension.document-script-removal-failed");
+        }
+
+        return removed || hasRegistration
             ? new(CodexDesktopExtensionResultState.Removed, "desktop.extension.removed")
             : new(CodexDesktopExtensionResultState.NotInstalled, "desktop.extension.not-installed");
     }
@@ -219,11 +231,16 @@ public sealed class CodexDesktopExtensionHost
             return new(CodexDesktopExtensionResultState.Rejected, "desktop.extension.payload-too-large");
         }
 
-        var expression = $"(() => {{ const update = window.__CODEX_RUNTIME_KIT_EXTENSIONS__?.[{JsonSerializer.Serialize(extensionId)}]?.update; if (typeof update !== 'function') return false; update({serializedPayload}); return true; }})()";
+        var expression = $"(() => {{ if (location.href !== 'app://-/index.html') return false; const update = window.__CODEX_RUNTIME_KIT_EXTENSIONS__?.[{JsonSerializer.Serialize(extensionId)}]?.update; if (typeof update !== 'function') return false; update({serializedPayload}); return true; }})()";
         var updated = await channel.EvaluateExtensionAsync(expression, cancellationToken).ConfigureAwait(false);
         if (!updated)
         {
             return new(CodexDesktopExtensionResultState.Failed, "desktop.extension.payload-update-failed");
+        }
+
+        if (!installed.Package.RestorePayloadOnReload)
+        {
+            return new(CodexDesktopExtensionResultState.Updated, "desktop.extension.payload-updated");
         }
 
         string? documentScriptId;
@@ -243,27 +260,9 @@ public sealed class CodexDesktopExtensionHost
             return new(CodexDesktopExtensionResultState.Failed, "desktop.extension.reload-payload-registration-failed");
         }
 
-        var documentScriptIds = installed.DocumentScriptIds.ToList();
-        documentScriptIds.Add(documentScriptId);
-        foreach (var oldId in installed.DocumentScriptIds)
-        {
-            try
-            {
-                if (await channel.RemoveDocumentScriptAsync(oldId, cancellationToken).ConfigureAwait(false))
-                {
-                    documentScriptIds.Remove(oldId);
-                }
-            }
-            catch (Exception) when (!cancellationToken.IsCancellationRequested)
-            {
-                // Keep the identifier so clean shutdown can retry; the current renderer has the new payload.
-            }
-        }
-
-        _installed[extensionId] = installed with
-        {
-            DocumentScriptIds = documentScriptIds,
-        };
+        var previousIds = installed.DocumentScriptIds.ToArray();
+        installed.DocumentScriptIds.Add(documentScriptId);
+        await RemoveRegisteredScriptsAsync(installed, previousIds, cancellationToken).ConfigureAwait(false);
         return new(CodexDesktopExtensionResultState.Updated, "desktop.extension.payload-updated");
     }
 
@@ -324,7 +323,7 @@ public sealed class CodexDesktopExtensionHost
     {
         var id = JsonSerializer.Serialize(package.Id);
         var version = JsonSerializer.Serialize(package.Version.ToString());
-        return $"(() => {{ if (location.href !== 'app://-/index.html') return false; const g = window.__CODEX_RUNTIME_KIT_EXTENSIONS__ ||= Object.create(null); const id = {id}; const version = {version}; const prior = g[id]; if (prior?.version === version) return true; prior?.cleanup?.(); const instance = ({package.JavaScript}); const cleanup = typeof instance === 'function' ? instance : instance?.cleanup; if (typeof cleanup !== 'function') return false; g[id] = {{ version, cleanup, update: typeof instance?.update === 'function' ? instance.update : null }}; return true; }})()";
+        return $"(() => {{ if (location.href !== 'app://-/index.html') return false; const g = window.__CODEX_RUNTIME_KIT_EXTENSIONS__ ||= Object.create(null); const id = {id}; delete (window.__CODEX_RUNTIME_KIT_DISABLED_EXTENSIONS__ ||= Object.create(null))[id]; const version = {version}; const prior = g[id]; if (prior?.version === version) return true; prior?.cleanup?.(); const instance = ({package.JavaScript}); const cleanup = typeof instance === 'function' ? instance : instance?.cleanup; if (typeof cleanup !== 'function') return false; g[id] = {{ version, cleanup, update: typeof instance?.update === 'function' ? instance.update : null }}; return true; }})()";
     }
 
     private static string CreateDocumentScript(CodexDesktopExtensionPackage package, string? initialPayloadJson)
@@ -339,7 +338,7 @@ public sealed class CodexDesktopExtensionHost
               const initialPayload = {{initialPayload}};
               let attempts = 0;
               const run = () => {
-                if (location.href !== 'app://-/index.html') return;
+                if (location.href !== 'app://-/index.html' || window.__CODEX_RUNTIME_KIT_DISABLED_EXTENSIONS__?.[id]) return;
                 const controls = [...document.querySelectorAll('button,[role=tab],[role=combobox]')].slice(0, 256);
                 const codex = controls.some(e => /codex/i.test([e.getAttribute('aria-label'),e.getAttribute('title'),e.getAttribute('data-testid')].filter(Boolean).join(' ')));
                 const ready = !!document.querySelector('main') && !!document.querySelector('[data-testid*=composer],[contenteditable=true],textarea') && codex;
@@ -366,34 +365,56 @@ public sealed class CodexDesktopExtensionHost
     }
 
     private static string CreateRemoveExpression(string extensionId) =>
-        $"(() => {{ const g = window.__CODEX_RUNTIME_KIT_EXTENSIONS__; const id = {JsonSerializer.Serialize(extensionId)}; const value = g?.[id]; if (!value) return false; try {{ value.cleanup?.(); }} finally {{ delete g[id]; }} return true; }})()";
+        $"(() => {{ if (location.href !== 'app://-/index.html') return false; const g = window.__CODEX_RUNTIME_KIT_EXTENSIONS__; const id = {JsonSerializer.Serialize(extensionId)}; (window.__CODEX_RUNTIME_KIT_DISABLED_EXTENSIONS__ ||= Object.create(null))[id] = true; const value = g?.[id]; if (!value) return false; try {{ value.cleanup?.(); }} finally {{ delete g[id]; }} return true; }})()";
 
-    private static async Task<bool> TryRemoveDocumentScriptsAsync(
-        ICodexDesktopExtensionChannel channel,
-        IReadOnlyList<string> identifiers,
-        CancellationToken cancellationToken = default)
+    private async Task RollBackInstallAsync(string extensionId, ICodexDesktopExtensionChannel channel, string scriptId)
     {
-        var removedAny = false;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await TryRemoveDocumentScriptAsync(channel, scriptId, timeout.Token).ConfigureAwait(false);
+        if (!_installed.TryGetValue(extensionId, out var previous) || !ReferenceEquals(previous.Channel, channel))
+        {
+            await TryRemoveExtensionAsync(channel, extensionId, timeout.Token).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task RemoveRegisteredScriptsAsync(
+        InstalledScript installed,
+        IReadOnlyList<string> identifiers,
+        CancellationToken cancellationToken)
+    {
         foreach (var identifier in identifiers)
         {
-            try
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await TryRemoveDocumentScriptAsync(installed.Channel, identifier, cancellationToken).ConfigureAwait(false))
             {
-                removedAny |= await channel.RemoveDocumentScriptAsync(identifier, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception) when (!cancellationToken.IsCancellationRequested)
-            {
-                // A closed renderer drops its document scripts with the target.
+                installed.DocumentScriptIds.Remove(identifier);
             }
         }
 
-        return removedAny;
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
-    private static async Task TryRemoveExtensionAsync(ICodexDesktopExtensionChannel channel, string extensionId)
+    private static async Task<bool> TryRemoveDocumentScriptAsync(
+        ICodexDesktopExtensionChannel channel,
+        string identifier,
+        CancellationToken cancellationToken)
     {
         try
         {
-            await channel.EvaluateExtensionAsync(CreateRemoveExpression(extensionId), CancellationToken.None).ConfigureAwait(false);
+            return await channel.RemoveDocumentScriptAsync(identifier, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static async Task TryRemoveExtensionAsync(ICodexDesktopExtensionChannel channel, string extensionId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await channel.EvaluateExtensionAsync(CreateRemoveExpression(extensionId), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -403,6 +424,6 @@ public sealed class CodexDesktopExtensionHost
 
     private sealed record InstalledScript(
         CodexDesktopExtensionPackage Package,
-        IReadOnlyList<string> DocumentScriptIds,
+        List<string> DocumentScriptIds,
         ICodexDesktopExtensionChannel Channel);
 }

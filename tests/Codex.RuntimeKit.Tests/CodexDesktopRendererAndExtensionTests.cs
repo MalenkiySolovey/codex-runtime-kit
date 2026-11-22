@@ -182,6 +182,34 @@ public sealed class CodexDesktopRendererAndExtensionTests
     }
 
     [Fact]
+    public async Task ExtensionHost_CanRequireLivePayloadAfterReloadAndRetryFailedRemoval()
+    {
+        const string id = "codex.api-balance";
+        const string script = "(() => () => {})()";
+        var hash = CodexDesktopExtensionHost.ComputeSha256(script);
+        var package = Package(id, new Version(1, 0, 0), script, hash) with { RestorePayloadOnReload = false };
+        var host = new CodexDesktopExtensionHost(new Dictionary<string, string> { [id] = hash });
+        var owner = new FakeExtensionChannel();
+        using var payload = System.Text.Json.JsonDocument.Parse("""{"windowValue":37}""");
+
+        await host.InstallOrUpdateAsync(package, DesktopVersion, owner);
+        var update = await host.UpdatePayloadAsync(id, payload.RootElement, owner);
+        var foreignRemoval = await host.RemoveAsync(id, new FakeExtensionChannel());
+        owner.RemovalResult = false;
+        var failedRemoval = await host.RemoveAsync(id, owner);
+        owner.RemovalResult = true;
+        var retriedRemoval = await host.RemoveAsync(id, owner);
+
+        Assert.Equal(CodexDesktopExtensionResultState.Updated, update.State);
+        Assert.DoesNotContain("windowValue", Assert.Single(owner.AddedScripts), StringComparison.Ordinal);
+        Assert.Contains("windowValue", owner.EvaluatedExpressions[1], StringComparison.Ordinal);
+        Assert.Equal(CodexDesktopExtensionResultState.Rejected, foreignRemoval.State);
+        Assert.Equal(CodexDesktopExtensionResultState.Failed, failedRemoval.State);
+        Assert.Equal(CodexDesktopExtensionResultState.Removed, retriedRemoval.State);
+        Assert.Equal(new[] { "script-1", "script-1" }, owner.RemovedScriptIds);
+    }
+
+    [Fact]
     public async Task ExtensionHost_RejectsUntrustedHashUnsupportedBuildAndUnverifiedRenderer()
     {
         const string script = "(() => () => {})()";
@@ -246,6 +274,7 @@ public sealed class CodexDesktopRendererAndExtensionTests
     {
         public bool IsVerifiedCodexRenderer { get; set; } = true;
         public bool EvaluationResult { get; set; } = true;
+        public bool RemovalResult { get; set; } = true;
         public List<string> AddedScripts { get; } = [];
         public List<string> EvaluatedExpressions { get; } = [];
         public List<string> RemovedScriptIds { get; } = [];
@@ -265,7 +294,7 @@ public sealed class CodexDesktopRendererAndExtensionTests
         public Task<bool> RemoveDocumentScriptAsync(string identifier, CancellationToken cancellationToken)
         {
             RemovedScriptIds.Add(identifier);
-            return Task.FromResult(true);
+            return Task.FromResult(RemovalResult);
         }
     }
 }

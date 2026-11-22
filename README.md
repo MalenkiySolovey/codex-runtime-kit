@@ -4,7 +4,7 @@
 
 - Target framework: `net10.0`
 - Package ID: `Codex.RuntimeKit`
-- Package version: `0.1.0-preview.2`
+- Package version: `0.1.0-preview.3`
 - Dependencies: none in the library package
 
 The library owns runtime discovery, the app-server transport, and Desktop app control. The host keeps account selection, credential storage, routing policy, application settings, UI, and application process registries.
@@ -67,6 +67,8 @@ The attached session intentionally has no public raw `Runtime.evaluate` or gener
 `CodexDesktopExtensionHost` accepts only a caller-bundled package whose identifier and SHA-256 are present in the host's compiled allowlist. Scripts have a 64 KiB size cap, a tested desktop-version range, and must return a cleanup function. The host registers a removable new-document script, injects idempotently into the verified main renderer, and removes the old script on update or disable. The bootstrap rechecks the main app URL, content signals, and Codex mode before running after navigation. There is no provider-catalog script execution, remote source loading, marketplace, or file-path based loader.
 
 The extension source still owns its specific UI anchor and must remove every root, event handler, and observer in its cleanup function. It should use a bounded observer, semantic anchors, text-only value updates, and fail closed when an anchor is missing or ambiguous. RuntimeKit does not choose an anchor or own provider/account data.
+
+Set `CodexDesktopExtensionPackage.RestorePayloadOnReload` to false when the caller must revalidate a live binding before sending the next payload after a reload. Removal unregisters the reload script before cleaning the current document and can be retried on the same renderer channel when script removal fails.
 
 The currently installed Desktop build was observed as MSIX `26.1117.3838.0`. RuntimeKit does not mark that build as compatible by default: a product integration must verify its status-slot anchor and visible cleanup/reload behavior before adding an explicit rule. Plugin-extension surfaces do not provide a documented bottom status pill.
 

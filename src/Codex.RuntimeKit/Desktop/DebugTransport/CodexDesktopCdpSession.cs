@@ -383,10 +383,9 @@ public sealed class CodexDesktopCdpSession : IAsyncDisposable
         {
             var id = Interlocked.Increment(ref _nextCommandId);
             var payload = JsonSerializer.SerializeToUtf8Bytes(new { id, method, @params = parameters });
-            await _socket.SendAsync(payload, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(4));
+            await _socket.SendAsync(payload, WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
             while (true)
             {
                 var message = await ReceiveMessageAsync(timeout.Token).ConfigureAwait(false);
