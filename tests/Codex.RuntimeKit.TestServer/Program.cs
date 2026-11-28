@@ -102,7 +102,24 @@ internal static class Program
             }
 
             var requestId = root.GetProperty("id").GetInt64();
-            if (method == "fixture/error" || scenario == "rpc-error")
+            if (method == "fixture/noResponse")
+            {
+                continue;
+            }
+            if (method == "account/login/start")
+            {
+                Console.Out.WriteLine("synthetic wrapper output");
+                await WriteAsync(outputLock, new { id = requestId, result = new { loginId = "synthetic-login", authUrl = "https://example.invalid/authorize" } }).ConfigureAwait(false);
+                if (scenario != "login-pending")
+                {
+                    await WriteAsync(outputLock, new { method = "account/login/completed", @params = new { loginId = "synthetic-login", success = true } }).ConfigureAwait(false);
+                }
+            }
+            else if (method == "account/login/cancel")
+            {
+                await WriteAsync(outputLock, new { id = requestId, result = new { status = "canceled" } }).ConfigureAwait(false);
+            }
+            else if (method == "fixture/error" || scenario == "rpc-error")
             {
                 await WriteAsync(outputLock, new { id = requestId, error = new { code = -32600, message = "synthetic error", data = new { fixture = true } } }).ConfigureAwait(false);
             }

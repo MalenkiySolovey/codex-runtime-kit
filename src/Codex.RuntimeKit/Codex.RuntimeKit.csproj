@@ -2,9 +2,9 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>Codex.RuntimeKit</PackageId>
-    <Version>0.1.0-preview.4</Version>
+    <Version>0.1.0-preview.5</Version>
     <Authors>MalenkiySolovey</Authors>
-    <Description>Codex CLI runtime discovery, app-server transport, and verified Desktop renderer extension primitives.</Description>
+    <Description>Codex configuration, isolated runtime lifecycle, app-server transport, and verified Desktop usage rendering.</Description>
     <PackageProjectUrl>https://github.com/MalenkiySolovey/codex-runtime-kit</PackageProjectUrl>
     <RepositoryUrl>https://github.com/MalenkiySolovey/codex-runtime-kit</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -15,5 +15,12 @@
   </PropertyGroup>
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Esprima" />
+    <EmbeddedResource Include="Desktop\Usage\CodexDesktopNativeUsage.js"
+                      LogicalName="Codex.RuntimeKit.Desktop.Usage.CodexDesktopNativeUsage.js" />
+    <EmbeddedResource Include="Desktop\Usage\CodexDesktopBalanceRendererExtension.js"
+                      LogicalName="Codex.RuntimeKit.Desktop.Usage.CodexDesktopBalanceRendererExtension.js" />
   </ItemGroup>
 </Project>

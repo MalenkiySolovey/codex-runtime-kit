@@ -386,8 +386,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             startInfo.ArgumentList.Add(argument);
         }
         startInfo.ArgumentList.Add("app-server");
-        startInfo.ArgumentList.Add("--listen");
-        startInfo.ArgumentList.Add("stdio://");
+        if (_options.ExplicitStdioListener)
+        {
+            startInfo.ArgumentList.Add("--listen");
+            startInfo.ArgumentList.Add("stdio://");
+        }
         startInfo.Environment["CODEX_HOME"] = _options.CodexHome;
         startInfo.Environment.Remove("OPENAI_API_KEY");
         startInfo.Environment.Remove("CODEX_API_KEY");
@@ -436,6 +439,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 try
                 {
                     HandleLine(line);
+                }
+                catch (JsonException) when (_options.AllowNonJsonOutput)
+                {
+                    // Some executable wrappers emit ordinary diagnostic lines before starting stdio.
                 }
                 catch (JsonException ex)
                 {

@@ -14,7 +14,8 @@ foreach ($file in $sourceFiles) {
     if ($content -match 'CodexSwitcher\.(Core|Infra|App)|CodexSwitchboard|ISwitchboardCodexProcessRegistry') {
         throw "RuntimeKit source depends on a product-specific Control Center contract: $($file.FullName)"
     }
-    if ($content -match 'auth\.json|TotpSecret|CredentialVault|ApiKeyStore') {
+    if ($content -match 'TotpSecret|CredentialVault|ApiKeyStore' -or
+        ($content -match 'auth\.json' -and $file.FullName -cne (Join-Path $sourceRoot 'Configuration/CodexRuntimeAuthFile.cs'))) {
         throw "RuntimeKit source contains a credential-storage dependency: $($file.FullName)"
     }
     if ($content -match '(?i)sk-[A-Za-z0-9]{20,}|eyJhbGciOi[A-Za-z0-9_-]{10,}\.') {
@@ -29,8 +30,10 @@ $packageReferences = $project.SelectNodes('/Project/ItemGroup/PackageReference')
 if ($projectReferences.Count -gt 0) {
     throw 'The standalone library must not contain project references.'
 }
-if ($packageReferences.Count -gt 0) {
-    throw 'The standalone library package must not add external package dependencies.'
+$centralPackages = [xml](Get-Content -LiteralPath (Join-Path $repoRoot 'Directory.Packages.props') -Raw)
+$approvedParser = $centralPackages.SelectNodes("/Project/ItemGroup/PackageVersion[@Include='Esprima' and @Version='3.0.6']")
+if ($packageReferences.Count -ne 1 -or $packageReferences[0].Include -cne 'Esprima' -or $approvedParser.Count -ne 1) {
+    throw 'The standalone library permits only the pinned Esprima parser for the Desktop usage recipe.'
 }
 
 if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {

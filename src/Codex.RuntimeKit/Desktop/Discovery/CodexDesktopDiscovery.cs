@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Win32;
@@ -55,6 +56,21 @@ public interface ICodexDesktopPackageLocationProvider
 }
 
 public sealed record CodexDesktopRegisteredPackageLocation(string PackageFullName, string InstallLocation);
+
+public enum CodexDesktopPackageIntegrity
+{
+    Unavailable,
+    Invalid,
+    Verified,
+}
+
+/// <summary>Platform access to Store signature, registration status, and package content verification.</summary>
+public interface ICodexDesktopStorePackageVerifier
+{
+    bool IsTrusted(CodexDesktopInstallation installation);
+    ValueTask<CodexDesktopPackageIntegrity> VerifyContentAsync(
+        CodexDesktopInstallation installation, CancellationToken cancellationToken);
+}
 
 /// <summary>Reads only current-user MSIX registration; it never inspects other users' package records.</summary>
 public sealed class WindowsCodexDesktopPackageLocationProvider : ICodexDesktopPackageLocationProvider
@@ -230,6 +246,37 @@ public sealed class CodexDesktopDiscovery
         return string.Equals(verified.ExecutablePath, Path.GetFullPath(candidate.ExecutablePath), StringComparison.OrdinalIgnoreCase) &&
                string.Equals(verified.InstallLocation, Path.GetFullPath(candidate.InstallLocation), StringComparison.OrdinalIgnoreCase) &&
                verified.Version == candidate.Version;
+    }
+
+    /// <summary>Finds the installed package of an exact, still-running Desktop process.</summary>
+    public CodexDesktopInstallation? FindForProcess(
+        int processId, DateTimeOffset startedAt, ICodexDesktopStorePackageVerifier storeVerifier)
+    {
+        ArgumentNullException.ThrowIfNull(storeVerifier);
+        using var process = Process.GetProcessById(processId);
+        if (process.HasExited || process.StartTime.ToUniversalTime() != startedAt.UtcDateTime ||
+            process.MainModule?.FileName is not { } executable)
+        {
+            return null;
+        }
+
+        var relative = Path.GetRelativePath(_options.WindowsAppsRoot, executable);
+        var directory = relative.Split(Path.DirectorySeparatorChar, 2);
+        if (directory.Length != 2) return null;
+
+        var packageRoot = Path.Combine(_options.WindowsAppsRoot, directory[0]);
+        foreach (var identity in _options.PackageIdentities)
+        {
+            if (directory[0].StartsWith(identity.PackageName + "_", StringComparison.Ordinal) &&
+                TryReadInstallation(packageRoot, identity, out var installation) &&
+                string.Equals(installation.ExecutablePath, executable, StringComparison.OrdinalIgnoreCase) &&
+                storeVerifier.IsTrusted(installation))
+            {
+                return installation;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsValidIdentity(CodexDesktopPackageIdentity identity) =>

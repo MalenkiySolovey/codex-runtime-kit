@@ -94,7 +94,16 @@
         }
       },
       "codex.runtimekit": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Esprima": "[3.0.6, )"
+        }
+      },
+      "Esprima": {
+        "type": "CentralTransitive",
+        "requested": "[3.0.6, )",
+        "resolved": "3.0.6",
+        "contentHash": "TpN21y4Ze2oOFcZGwn5LHDcrht5ORvHXh4okmOfOdNptoVK5v1GBKyN/7BZk5vg+y/om6ytdWgZ1LtQpCQd7RA=="
       }
     }
   }

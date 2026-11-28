@@ -10,6 +10,9 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
   <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Codex.RuntimeKit\Codex.RuntimeKit.csproj" />
     <ProjectReference Include="..\Codex.RuntimeKit.TestServer\Codex.RuntimeKit.TestServer.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

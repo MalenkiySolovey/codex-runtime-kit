@@ -9,13 +9,13 @@ public static class CodexDesktopParentLifetime
 {
     private const string ParentProcessIdVariable = "CODEX_ELECTRON_DEV_PARENT_PID";
     private const string WebviewProcessIdVariable = "CODEX_ELECTRON_DEV_WEBVIEW_PID";
-    private static readonly Version VerifiedVersion = new(26, 1117, 4957, 0);
+    private static readonly HashSet<Version> VerifiedVersions = [new(26, 1117, 4957, 0), new(26, 1120, 6357, 0)];
 
     /// <summary>Checks a previously verified installation against the tested Desktop build.</summary>
     public static bool IsSupported(CodexDesktopInstallation installation) =>
         OperatingSystem.IsWindows() &&
         installation.PackageFamilyName == "OpenAI.Codex_2p2nqsd0c76g0" &&
-        installation.Version == VerifiedVersion;
+        VerifiedVersions.Contains(installation.Version);
 
     /// <summary>Clears inherited development lifetime settings and applies the owned supervisor when supported.</summary>
     public static bool ConfigureLaunch(

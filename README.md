@@ -1,6 +1,6 @@
 # Codex Runtime Kit
 
-`Codex.RuntimeKit` is a small .NET library for discovering local Codex CLI executables, probing runtime capabilities, connecting to the Codex app-server over stdio, and managing a verified Codex Desktop renderer extension session.
+`Codex.RuntimeKit` discovers local Codex installations, applies isolated configuration, manages owned processes and app-server connections, and renders usage in a verified Codex Desktop session.
 
 - Target framework: `net10.0`
 - Package ID: `Codex.RuntimeKit`
@@ -68,11 +68,17 @@ The attached session intentionally has no public raw `Runtime.evaluate` or gener
 
 `CodexDesktopExtensionHost` accepts only a caller-bundled package whose identifier and SHA-256 are present in the host's compiled allowlist. Scripts have a 64 KiB size cap, a tested desktop-version range, and must return a cleanup function. The host registers a removable new-document script, injects idempotently into the verified main renderer, and removes the old script on update or disable. The bootstrap rechecks the main app URL, content signals, and Codex mode before running after navigation. There is no provider-catalog script execution, remote source loading, marketplace, or file-path based loader.
 
-The extension source still owns its specific UI anchor and must remove every root, event handler, and observer in its cleanup function. It should use a bounded observer, semantic anchors, text-only value updates, and fail closed when an anchor is missing or ambiguous. RuntimeKit does not choose an anchor or own provider/account data.
+Custom extensions supply their own anchors and clean up their roots, event handlers, and observers. The bundled usage extension detects the installed components in a Store-verified ASAR and selects its own anchors. Both scripts are embedded in the package and checked against reviewed SHA-256 hashes.
 
 Set `CodexDesktopExtensionPackage.RestorePayloadOnReload` to false when the caller must revalidate a live binding before sending the next payload after a reload. Removal unregisters the reload script before cleaning the current document and can be retried on the same renderer channel when script removal fails.
 
-The currently installed Desktop build was observed as MSIX `26.1117.3838.0`. RuntimeKit does not mark that build as compatible by default: a product integration must verify its status-slot anchor and visible cleanup/reload behavior before adding an explicit rule. Plugin-extension surfaces do not provide a documented bottom status pill.
+For the bundled usage surface, construct `CodexDesktopNativeUsagePackage` with a platform adapter implementing `ICodexDesktopStorePackageVerifier`. After verifying the managed process and attaching with `CodexDesktopDebugTransport`, give the verified renderer to `CodexDesktopUsageAttachment`. The caller supplies display-only values through the requested native or fallback payload form. The attachment reports placement and compatibility states and removes its extension when disposed. The native recipe checks candidate asset integrity and falls back to the bundled toolbar indicator when it cannot identify the required components.
+
+## Isolated configuration and process lifecycle
+
+- `ConfigTomlStore` reads and changes the root credential-store setting. `CodexRoutingConfigStore` takes atomic file operations, state paths, and product-owned provider rules as inputs. It preserves unrelated TOML and the routing baseline during route changes.
+- `CodexIsolatedConfig` renders a new profile's config. `CodexRuntimeAuthFile` accepts caller-supplied bytes for an isolated runtime home. The caller selects profiles, controls directory permissions, and owns credential persistence.
+- `CodexProcessLauncher` validates profile arguments, sets child-only environment variables, and starts the selected CLI or Desktop executable. `CodexProcessLifecycle` checks persisted process identities and performs bounded stop. Desktop uses the verified exit supervisor on supported builds and a graceful window close otherwise.
 
 ## Runtime discovery
 
@@ -115,6 +121,8 @@ await client.StopAsync();
 The transport starts only the executable supplied by the caller, performs the `initialize` → `initialized` handshake, and reads newline-delimited JSON messages. It does not add a `jsonrpc` envelope. Requests are correlated by ID; notifications and server-initiated messages are exposed through `EventReceived`. Callers can provide an `IAppServerProcessLifecycleObserver` to connect process start and exit to host-owned lifecycle tracking.
 
 The client sets the child process `CODEX_HOME` to the supplied directory and removes inherited `OPENAI_API_KEY` and `CODEX_API_KEY` variables. It does not read, create, or select user accounts. Probe processes use a temporary `CODEX_HOME`, remove inherited credential variables, and use bounded timeouts and output capture.
+
+`CodexAppServerLoginSession` uses the same transport for browser login and reports the authorization URL and completion to the host. `CodexUsageResponseParser` exposes account, rate-limit, and activity observations. Identity interpretation, billing, and text for users belong to the consumer.
 
 See the [Codex app-server protocol documentation](https://developers.openai.com/codex/app-server/) for the current wire protocol.
 

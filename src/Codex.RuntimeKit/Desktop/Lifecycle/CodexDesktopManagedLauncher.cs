@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Codex.RuntimeKit.Desktop.DebugTransport;
 using Codex.RuntimeKit.Desktop.Discovery;
+using Codex.RuntimeKit.Lifecycle;
 
 namespace Codex.RuntimeKit.Desktop.Lifecycle;
 
@@ -138,13 +139,9 @@ public sealed class CodexDesktopManagedLauncher
                 WorkingDirectory = request.Installation.InstallLocation,
                 CreateNoWindow = false,
             };
-            startInfo.ArgumentList.Add($"--user-data-dir={profile}");
-            startInfo.ArgumentList.Add("--remote-debugging-address=127.0.0.1");
-            startInfo.ArgumentList.Add("--remote-debugging-port=0");
+            ConfigureProfileStart(startInfo, profile, enableLoopbackDebugging: true);
             startInfo.ArgumentList.Add("--no-first-run");
             startInfo.Environment["CODEX_HOME"] = codexHome;
-            startInfo.Environment.Remove("OPENAI_API_KEY");
-            startInfo.Environment.Remove("CODEX_API_KEY");
             CodexDesktopParentLifetime.ConfigureLaunch(startInfo, request.Installation);
 
             var process = _processStarter.Start(startInfo);
@@ -271,6 +268,21 @@ public sealed class CodexDesktopManagedLauncher
         }
     }
 
+    internal static void ConfigureProfileStart(ProcessStartInfo startInfo, string? profile, bool enableLoopbackDebugging)
+    {
+        startInfo.Environment.Remove("CODEX_ELECTRON_USER_DATA_PATH");
+        if (profile is null) return;
+
+        startInfo.Environment.Remove("OPENAI_API_KEY");
+        startInfo.Environment.Remove("CODEX_API_KEY");
+        // Pass the profile at Chromium startup, before Desktop initializes its user-data path.
+        startInfo.ArgumentList.Add($"--user-data-dir={profile}");
+        if (!enableLoopbackDebugging) return;
+
+        startInfo.ArgumentList.Add("--remote-debugging-address=127.0.0.1");
+        startInfo.ArgumentList.Add("--remote-debugging-port=0");
+    }
+
     private static string DefaultProfileRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CodexRuntimeKit",
@@ -330,23 +342,8 @@ public sealed class CodexDesktopManagedSession : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
 
-        if (!IsRunning)
-        {
-            return true;
-        }
-
-        _process.CloseMainWindow();
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(timeout);
-        try
-        {
-            await _process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
-            return true;
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return !IsRunning;
-        }
+        return await CodexProcessLifecycle.RequestGracefulStopAsync(
+            _process, requestWindowClose: true, timeout, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask DisposeAsync()

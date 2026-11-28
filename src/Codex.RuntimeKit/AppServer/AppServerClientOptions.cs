@@ -12,6 +12,8 @@ public sealed record AppServerClientOptions
     public string ExecutablePath { get; init; } = string.Empty;
     public string CodexHome { get; init; } = string.Empty;
     public IReadOnlyList<string> ExecutableArgumentPrefix { get; init; } = [];
+    public bool ExplicitStdioListener { get; init; } = true;
+    public bool AllowNonJsonOutput { get; init; }
     public AppServerClientInfo ClientInfo { get; init; } = new("Codex.RuntimeKit", "Codex Runtime Kit", "0.1.0");
     public TimeSpan ProcessStartTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan InitializationTimeout { get; init; } = TimeSpan.FromSeconds(20);

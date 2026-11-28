@@ -22,6 +22,33 @@ public sealed record CodexDesktopDebugEndpoint
     public Uri BaseAddress { get; }
     public Uri BrowserWebSocketAddress { get; }
 
+    /// <summary>Verifies the listener and the visible window of the exact managed Desktop process.</summary>
+    public static bool TryReadManagedProfile(
+        string profileDirectory,
+        string expectedExecutablePath,
+        int processId,
+        DateTimeOffset startedAt,
+        ICodexDesktopListenerOwnerResolver ownerResolver,
+        out CodexDesktopDebugEndpoint? endpoint)
+    {
+        endpoint = null;
+        if (!TryReadManagedProfile(profileDirectory, expectedExecutablePath, ownerResolver, out var candidate, out _) ||
+            candidate?.ProcessId != processId)
+        {
+            return false;
+        }
+
+        using var process = Process.GetProcessById(processId);
+        if (process.HasExited || process.StartTime.ToUniversalTime() != startedAt.UtcDateTime ||
+            process.MainWindowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        endpoint = candidate;
+        return true;
+    }
+
     public static bool TryReadManagedProfile(
         string profileDirectory,
         CodexDesktopManagedSession session,

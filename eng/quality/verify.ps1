@@ -46,7 +46,7 @@ try {
         $packageRoot = Join-Path $repoRoot 'artifacts\verification-packages'
         $firstFeed = Join-Path $packageRoot 'first'
         $secondFeed = Join-Path $packageRoot 'second'
-        $consumerRoot = Join-Path $repoRoot 'artifacts\package-consumer'
+        $consumerRoot = Join-Path $repoRoot ('artifacts\package-consumer\' + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $firstFeed, $secondFeed, $consumerRoot -Force | Out-Null
 
         foreach ($feed in @($firstFeed, $secondFeed)) {
@@ -71,6 +71,21 @@ try {
 
         $consumerProject = Join-Path $consumerRoot 'PackageConsumer.csproj'
         $consumerProgram = Join-Path $consumerRoot 'Program.cs'
+        $consumerConfig = Join-Path $consumerRoot 'NuGet.Config'
+        $escapedFeed = [Security.SecurityElement]::Escape($firstFeed)
+        @"
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="runtime-kit" value="$escapedFeed" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+  <packageSourceMapping>
+    <packageSource key="runtime-kit"><package pattern="Codex.RuntimeKit" /></packageSource>
+    <packageSource key="nuget.org"><package pattern="Esprima" /></packageSource>
+  </packageSourceMapping>
+</configuration>
+"@ | Set-Content -LiteralPath $consumerConfig -Encoding utf8
         @'
 <Project>
   <PropertyGroup>
@@ -92,17 +107,25 @@ try {
         @'
 using Codex.RuntimeKit.AppServer;
 using Codex.RuntimeKit.Discovery;
+using Codex.RuntimeKit.Desktop.Usage;
 
 var resolver = new CodexRuntimeResolver();
 var validation = resolver.ValidateExecutable("synthetic-candidate");
 var clientOptions = new AppServerClientOptions { ExecutablePath = "codex", CodexHome = "isolated-home" };
+var rendererPackage = CodexDesktopBalanceRendererExtension.CreatePackage();
+using var template = typeof(CodexDesktopNativeUsagePackage).Assembly.GetManifestResourceStream(
+    "Codex.RuntimeKit.Desktop.Usage.CodexDesktopNativeUsage.js");
+if (rendererPackage is null || template is null || template.Length == 0)
+    throw new System.InvalidOperationException("Packaged Desktop resources failed verification.");
 Console.WriteLine($"{validation.IsValid}:{clientOptions.ClientInfo.Name}");
 '@ | Set-Content -LiteralPath $consumerProgram -Encoding utf8
 
-        & dotnet restore $consumerProject --source $firstFeed
+        & dotnet restore $consumerProject --configfile $consumerConfig --packages (Join-Path $consumerRoot 'packages')
         if ($LASTEXITCODE -ne 0) { throw 'Standalone package consumer restore failed.' }
         & dotnet build $consumerProject --configuration Release --no-restore
         if ($LASTEXITCODE -ne 0) { throw 'Standalone package consumer build failed.' }
+        & dotnet run --project $consumerProject --configuration Release --no-build --no-restore
+        if ($LASTEXITCODE -ne 0) { throw 'Standalone package consumer verification failed.' }
 
         Write-Host "PACKAGE_SHA256=$firstHash"
         Write-Host "PACKAGE_VERSION=$packageVersion"

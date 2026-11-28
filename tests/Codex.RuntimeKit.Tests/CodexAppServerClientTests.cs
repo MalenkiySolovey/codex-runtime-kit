@@ -93,16 +93,37 @@ public sealed class CodexAppServerClientTests
         Assert.True(rpcError.ErrorData!.Value.GetProperty("fixture").GetBoolean());
 
         await Assert.ThrowsAsync<TimeoutException>(() => client.RequestAsync(
-            "fixture/delay",
+            "fixture/noResponse",
             timeout: TimeSpan.FromMilliseconds(75)));
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(75));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.RequestAsync(
-            "fixture/delay",
+            "fixture/noResponse",
             cancellationToken: cancellation.Token));
 
         var echo = await client.RequestAsync("fixture/echo", new { value = "still-connected" });
         Assert.Equal("still-connected", echo.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task BrowserLoginUsesTheSameOwnedStdioTransport()
+    {
+        using var temp = new TemporaryDirectory();
+        var observer = new TestLifecycleObserver();
+        var options = CreateOptions(temp.Path, observer) with
+        {
+            ExplicitStdioListener = false,
+            AllowNonJsonOutput = true,
+        };
+
+        await using (var login = await CodexAppServerLoginSession.StartAsync(options))
+        {
+            Assert.Equal("synthetic-login", login.LoginId);
+            Assert.Equal("https://example.invalid/authorize", login.AuthUrl);
+            Assert.True((await login.Completion.WaitAsync(TimeSpan.FromSeconds(5))).Success);
+        }
+
+        Assert.Equal(Assert.Single(observer.RegisteredProcessIds), Assert.Single(observer.UnregisteredProcessIds));
     }
 
     [Fact]
